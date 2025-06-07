@@ -82,7 +82,7 @@ async def create_chat_completion(
         # 流式响应
         if stream:
             return StreamingResponse(
-                _generate_stream(llm, prompt, sampling_params, model_id),
+                _generate_stream_fixed(llm, prompt, sampling_params, model_id),
                 media_type="text/event-stream"
             )
         
@@ -151,7 +151,7 @@ async def create_completion(
         # 流式响应
         if stream:
             return StreamingResponse(
-                _generate_completion_stream(llm, request.prompt, sampling_params, model_id),
+                _generate_completion_stream_fixed(llm, request.prompt, sampling_params, model_id),
                 media_type="text/event-stream"
             )
         
@@ -273,6 +273,264 @@ async def _generate_completion(llm, prompt, sampling_params):
         logger.error(f"Error in _generate_completion: {str(e)}")
         raise
 
+# 修复版本的流式生成函数，不使用generate_iterator
+async def _generate_stream_fixed(llm, prompt, sampling_params, model_id):
+    """生成流式响应（修复版本）"""
+    # 创建响应ID
+    response_id = f"chatcmpl-{_generate_id()}"
+    created = int(time.time())
+    
+    try:
+        # 发送开始标记
+        start_response = {
+            "id": response_id,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model_id,
+            "choices": [{
+                "index": 0,
+                "delta": {"role": "assistant"},
+                "finish_reason": None
+            }]
+        }
+        yield f"data: {json.dumps(start_response)}\n\n"
+        
+        # 启动生成
+        loop = asyncio.get_event_loop()
+        generation_task = loop.run_in_executor(
+            None, 
+            lambda: llm.generate([prompt], sampling_params)
+        )
+        
+        last_text = ""
+        finished = False
+        
+        # 循环检查生成进度
+        while not finished:
+            # 检查任务是否完成
+            if generation_task.done():
+                outputs = generation_task.result()
+                output_text = outputs[0].outputs[0].text
+                finish_reason = outputs[0].outputs[0].finish_reason or "stop"
+                
+                # 发送最后一部分文本（如果有）
+                if output_text != last_text:
+                    delta_text = output_text[len(last_text):]
+                    
+                    delta_response = {
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model_id,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"content": delta_text},
+                            "finish_reason": None
+                        }]
+                    }
+                    
+                    yield f"data: {json.dumps(delta_response)}\n\n"
+                
+                # 发送完成标记
+                final_response = {
+                    "id": response_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model_id,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": finish_reason
+                    }]
+                }
+                
+                yield f"data: {json.dumps(final_response)}\n\n"
+                finished = True
+                
+            else:
+                # 尝试获取中间结果
+                try:
+                    # 这里需要访问vLLM内部状态，可能会因vLLM版本不同而需要调整
+                    if hasattr(llm, 'llm_engine'):
+                        engine = llm.llm_engine
+                    elif hasattr(llm, 'engine'):
+                        engine = llm.engine
+                    else:
+                        # 如果无法获取引擎，等待一小段时间后继续
+                        await asyncio.sleep(0.1)
+                        continue
+                    
+                    # 尝试获取当前生成的文本
+                    seq_group_id = list(engine.scheduler.running.keys())[0] if engine.scheduler.running else None
+                    if seq_group_id:
+                        sequence = engine.scheduler.running[seq_group_id].sequences[0]
+                        output_text = engine.detokenizer.detokenize(sequence.output_ids)
+                        
+                        # 只发送增量部分
+                        if output_text != last_text:
+                            delta_text = output_text[len(last_text):]
+                            last_text = output_text
+                            
+                            if delta_text:
+                                delta_response = {
+                                    "id": response_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created,
+                                    "model": model_id,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {"content": delta_text},
+                                        "finish_reason": None
+                                    }]
+                                }
+                                
+                                yield f"data: {json.dumps(delta_response)}\n\n"
+                except Exception as e:
+                    # 忽略获取中间结果的错误，继续等待完成
+                    logger.debug(f"Error getting intermediate results: {str(e)}")
+                
+                # 短暂等待后继续检查
+                await asyncio.sleep(0.1)
+        
+        # 发送结束标记
+        yield "data: [DONE]\n\n"
+        
+    except Exception as e:
+        logger.error(f"Error in stream generation: {str(e)}")
+        error_response = {
+            "error": {
+                "message": str(e),
+                "type": "server_error",
+                "code": 500
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
+        yield "data: [DONE]\n\n"
+
+# 修复版本的文本完成流式生成函数
+async def _generate_completion_stream_fixed(llm, prompt, sampling_params, model_id):
+    """生成文本完成流式响应（修复版本）"""
+    # 创建响应ID
+    response_id = f"cmpl-{_generate_id()}"
+    created = int(time.time())
+    
+    try:
+        # 启动生成
+        loop = asyncio.get_event_loop()
+        generation_task = loop.run_in_executor(
+            None, 
+            lambda: llm.generate([prompt], sampling_params)
+        )
+        
+        last_text = ""
+        finished = False
+        
+        # 循环检查生成进度
+        while not finished:
+            # 检查任务是否完成
+            if generation_task.done():
+                outputs = generation_task.result()
+                output_text = outputs[0].outputs[0].text
+                finish_reason = outputs[0].outputs[0].finish_reason or "stop"
+                
+                # 发送最后一部分文本（如果有）
+                if output_text != last_text:
+                    delta_text = output_text[len(last_text):]
+                    
+                    stream_response = {
+                        "id": response_id,
+                        "object": "text_completion",
+                        "created": created,
+                        "model": model_id,
+                        "choices": [{
+                            "text": delta_text,
+                            "index": 0,
+                            "logprobs": None,
+                            "finish_reason": None
+                        }]
+                    }
+                    
+                    yield f"data: {json.dumps(stream_response)}\n\n"
+                
+                # 发送完成标记
+                final_response = {
+                    "id": response_id,
+                    "object": "text_completion",
+                    "created": created,
+                    "model": model_id,
+                    "choices": [{
+                        "text": "",
+                        "index": 0,
+                        "logprobs": None,
+                        "finish_reason": finish_reason
+                    }]
+                }
+                
+                yield f"data: {json.dumps(final_response)}\n\n"
+                finished = True
+                
+            else:
+                # 尝试获取中间结果
+                try:
+                    # 这里需要访问vLLM内部状态，可能会因vLLM版本不同而需要调整
+                    if hasattr(llm, 'llm_engine'):
+                        engine = llm.llm_engine
+                    elif hasattr(llm, 'engine'):
+                        engine = llm.engine
+                    else:
+                        # 如果无法获取引擎，等待一小段时间后继续
+                        await asyncio.sleep(0.1)
+                        continue
+                    
+                    # 尝试获取当前生成的文本
+                    seq_group_id = list(engine.scheduler.running.keys())[0] if engine.scheduler.running else None
+                    if seq_group_id:
+                        sequence = engine.scheduler.running[seq_group_id].sequences[0]
+                        output_text = engine.detokenizer.detokenize(sequence.output_ids)
+                        
+                        # 只发送增量部分
+                        if output_text != last_text:
+                            delta_text = output_text[len(last_text):]
+                            last_text = output_text
+                            
+                            if delta_text:
+                                stream_response = {
+                                    "id": response_id,
+                                    "object": "text_completion",
+                                    "created": created,
+                                    "model": model_id,
+                                    "choices": [{
+                                        "text": delta_text,
+                                        "index": 0,
+                                        "logprobs": None,
+                                        "finish_reason": None
+                                    }]
+                                }
+                                
+                                yield f"data: {json.dumps(stream_response)}\n\n"
+                except Exception as e:
+                    # 忽略获取中间结果的错误，继续等待完成
+                    logger.debug(f"Error getting intermediate results: {str(e)}")
+                
+                # 短暂等待后继续检查
+                await asyncio.sleep(0.1)
+        
+        # 发送结束标记
+        yield "data: [DONE]\n\n"
+        
+    except Exception as e:
+        logger.error(f"Error in completion stream: {str(e)}")
+        error_response = {
+            "error": {
+                "message": str(e),
+                "type": "server_error",
+                "code": 500
+            }
+        }
+        yield f"data: {json.dumps(error_response)}\n\n"
+        yield "data: [DONE]\n\n"
+
+# 旧的流式生成函数（保留作为参考）
 async def _generate_stream(llm, prompt, sampling_params, model_id):
     """生成流式响应"""
     # 创建响应ID
