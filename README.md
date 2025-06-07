@@ -281,6 +281,68 @@ for chunk in stream:
         print(chunk.choices[0].delta.content, end="")
 ```
 
+## 多模态模型示例
+
+对于支持多模态功能的模型（如Qwen-VL、LLaVA等），可以通过以下方式调用：
+
+### 多模态聊天请求
+
+```bash
+curl -X POST "http://localhost:8050/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-myapikey123456789" \
+  -d '{
+    "model": "Qwen-VL-Chat",
+    "messages": [
+      {"role": "system", "content": "你是一个有用的AI助手，能够理解图像和文本。"},
+      {"role": "user", "content": [
+        {"type": "text", "text": "这张图片里有什么？"},
+        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEA..."}}  
+      ]}
+    ],
+    "temperature": 0.7,
+    "max_tokens": 500
+  }'
+```
+
+### 使用Python客户端进行多模态请求
+
+```python
+from openai import OpenAI
+import base64
+
+# 初始化客户端
+client = OpenAI(
+    api_key="sk-myapikey123456789",
+    base_url="http://localhost:8050/v1"
+)
+
+# 读取并编码图像
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+# 获取base64编码的图像
+image_path = "path/to/your/image.jpg"
+base64_image = encode_image(image_path)
+
+# 创建多模态请求
+response = client.chat.completions.create(
+    model="Qwen-VL-Chat",
+    messages=[
+        {"role": "system", "content": "你是一个有用的AI助手，能够理解图像和文本。"},
+        {"role": "user", "content": [
+            {"type": "text", "text": "请描述这张图片并分析其中的主要内容。"},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+        ]}
+    ],
+    temperature=0.7,
+    max_tokens=1000
+)
+
+print(response.choices[0].message.content)
+```
+
 ## 常见问题解答
 
 ### 1. 如何添加新模型？
@@ -317,6 +379,17 @@ auth:
       name: "新用户名称"
       permissions: ["chat", "completions"]  # 或["all"]
 ```
+
+### 4. 流式输出报错 "'LLM' object has no attribute 'generate_iterator'" 怎么解决？
+
+这个错误通常是因为使用的vLLM版本不支持`generate_iterator`方法。解决方法：
+
+1. 升级vLLM到最新版本：
+```bash
+pip install -U vllm
+```
+
+2. 如果仍然有问题，可以修改`api/openai_compat.py`文件中的流式生成函数，使用异步迭代器手动实现流式输出。
 
 ## 性能优化
 
