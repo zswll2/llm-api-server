@@ -1,0 +1,45 @@
+# Python 缓存文件
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*.cpython-*.pyc
+
+# 日志文件夹
+logs/
+*.log
+
+# 进程 ID 文件
+*.pid
+gunicorn.pid
+
+# 配置文件（可能包含敏感信息）
+config.yaml
+uwsgi.ini
+
+# 脚本文件（如果不想包含在版本控制中）
+*.sh
+dow.sh
+git.sh
+
+# 模型文件（通常很大）
+models/
+
+# 环境变量文件（如果有）
+.env
+.env.*
+
+# 虚拟环境（如果存在）
+venv/
+env/
+
+# 由 Git 管理脚本添加的排除模式 - Sat Jun  7 10:15:41 AM CST 2025
+logs/
+temp/
+models/
+结果.json
+test
+test.py
+PR2505-0860.pdf
+git.sh
+
+# 由 Git 管理脚本添加的排除模式 - Sat Jun  7 10:18:55 AM CST 2025
