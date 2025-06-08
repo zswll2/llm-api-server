@@ -1,0 +1,67 @@
+# 服务配置
+server:
+  host: "0.0.0.0"
+  port: 8050
+  workers: 1
+  timeout: 300
+
+# 认证配置
+auth:
+  enabled: true
+  # 生成密钥: openssl rand -hex 32
+  secret_key: "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+  algorithm: "HS256"
+  # 预设API密钥列表
+  api_keys:
+    - key: "sk-myapikey123456789"
+      name: "default"
+      permissions: ["all"]
+    - key: "sk-restricted987654321"
+      name: "restricted"
+      permissions: ["chat"]
+
+# 日志配置
+logging:
+  level: "DEBUG"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+  retention: "7 days"
+  rotation: "1 day"
+  path: "logs"  # 相对路径，从运行目录计算
+  console: true
+
+# 模型配置
+models:
+  default: "DeepSeek-R1-0528-Qwen3-8B"  # 默认模型ID
+  preload: ["DeepSeek-R1-0528-Qwen3-8B"]  # 启动时预加载的模型
+  max_loaded: 3  # 同时加载的最大模型数量
+  unload_timeout: 3600  # 模型不活跃多少秒后卸载 (0表示不卸载)
+  models_dir: "models"  # 相对路径，从运行目录计算
+  
+  # 可用模型列表
+  available:
+    DeepSeek-R1-0528-Qwen3-8B:
+      path: "/www/Python/llm-api-server/models/deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"
+      type: "qwen"
+      max_tokens: 4096
+      quantization: null  # null表示不量化
+      tensor_parallel_size: 1
+      gpu_memory_utilization: 0.8
+      trust_remote_code: true
+    
+    Gemma-3-27b-it:
+      path: "/data2.6T/models/google/gemma-3-27b-it"
+      type: "gemma"
+      max_tokens: 8192
+      quantization: "bitsandbytes"  # 修改为vllm支持的量化方法
+      tensor_parallel_size: 1
+      gpu_memory_utilization: 0.9
+      trust_remote_code: true
+      
+
+# 推理配置
+inference:
+  max_total_tokens: 4096  # 输入+输出的最大token数
+  max_input_tokens: 3072  # 最大输入token数
+  max_batch_size: 32
+  streaming_default: true  # 默认是否使用流式输出
+  optimize_first_token: true  # 是否优化首字延迟
